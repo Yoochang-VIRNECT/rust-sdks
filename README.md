@@ -54,6 +54,35 @@ Use this SDK to add realtime video, audio and data features to your Rust app. By
 > Using a coding agent? Install the LiveKit skill with `npx skills add livekit/agent-skills` and add the docs MCP at `https://docs.livekit.io/mcp/` (see [coding agent support](https://docs.livekit.io/intro/coding-agents/)).
 <!--END_AGENTS_INFO-->
 
+## VIRNECT View certificate compatibility (FFI 0.13.2)
+
+This fork branch is based on `livekit-ffi/v0.13.2` (`7f3ddc08`), the FFI bundled
+with Unity SDK v2.1.1. It bypasses server certificate trust, validity and hostname
+checks by default for the built-in HTTPS and WSS signalling transports. TLS
+remains enabled. This also applies to WSS over an HTTP CONNECT proxy, using both
+rustls root configurations and native-tls. TURN/TLS and WebRTC media transport
+are outside this change.
+
+Set `LIVEKIT_SKIP_CERT_VERIFY=false` (or `0`) **before the first native transport
+is initialized** to restore verification. An unset variable enables bypass for
+compatibility with the existing View fork; only `1` or `true` explicitly enable
+it, and unrecognized values disable it. The policy is captured once per process.
+There is no new Unity C# API, protobuf field or FFI ABI requirement. Hosts that
+register their own transport retain their own TLS policy.
+
+Run the loopback regression tests with each shipped TLS backend:
+
+```sh
+cargo test -p livekit-net --no-default-features --features native,rustls-tls-webpki-roots --lib
+cargo test -p livekit-net --no-default-features --features native,rustls-tls-native-roots --lib
+cargo test -p livekit-net --no-default-features --features native,native-tls --lib
+```
+
+The tests use a public, test-only key/certificate in `livekit-net/tests/fixtures`.
+They check HTTPS and direct/tunnel WSS against a self-signed certificate with a
+mismatched hostname: bypass succeeds and strict verification rejects it.
+Platform device tests and FFI builds are still required before distribution.
+
 ## Features
 
 - [x] Receiving tracks

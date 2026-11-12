@@ -22,10 +22,13 @@ native = ["dep:tokio-tungstenite", "dep:reqwest", "dep:tokio", "dep:futures-util
 
 # ── TLS (only meaningful with a native backend) ───────────────────
 native-tls = [
+    "dep:native-tls",
     "tokio-tungstenite?/native-tls",
     "reqwest?/native-tls",
 ]
 native-tls-vendored = [
+    "native-tls",
+    "native-tls/vendored",
     "tokio-tungstenite?/native-tls-vendored",
     "reqwest?/native-tls-vendored",
 ]
@@ -37,10 +40,11 @@ rustls-tls-native-roots = [
     "dep:rustls-native-certs",
 ]
 rustls-tls-webpki-roots = [
+    "dep:tokio-rustls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
     "reqwest?/rustls-tls-webpki-roots",
 ]
-__rustls-tls = ["tokio-tungstenite?/__rustls-tls", "reqwest?/__rustls"]
+__rustls-tls = ["dep:tokio-rustls", "tokio-tungstenite?/__rustls-tls", "reqwest?/__rustls"]
 
 # How CI checks this crate's features, read by
 # `.github/workflows/feature-combinations-curated.yml` via `cargo metadata`.
@@ -63,6 +67,7 @@ log = { workspace = true }
 tokio-tungstenite = { version = "0.29", features = ["url"], optional = true }
 tokio = { workspace = true, default-features = false, features = ["sync", "macros", "io-util", "net", "time", "rt-multi-thread"], optional = true }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"], optional = true }
+native-tls = { version = "0.2", optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
 futures-util = { workspace = true, default-features = false, features = ["sink"], optional = true }
 bytes = { workspace = true, optional = true }
@@ -70,6 +75,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json"], opt
 base64 = { version = "0.21", optional = true, features = ["std"] }
 
 [dev-dependencies]
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "time", "macros", "io-util"] }
 tokio-tungstenite = { version = "0.29", features = ["url"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }

@@ -3945,6 +3945,7 @@ dependencies = [
  "futures-util",
  "http 1.4.2",
  "log",
+ "native-tls",
  "reqwest 0.12.28",
  "rustls-native-certs",
  "tokio",

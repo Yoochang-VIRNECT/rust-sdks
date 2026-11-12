@@ -14,6 +14,7 @@
 
 mod connection;
 mod proxy;
+mod tls;
 
 use crate::{
     Header, HttpClient, HttpMethod, HttpResponse, TransportError, WsClient, WsConnectResult,
@@ -42,7 +43,7 @@ pub struct NativeTransport {
 
 impl NativeTransport {
     pub(crate) fn new() -> Self {
-        Self { http: reqwest::Client::new() }
+        Self { http: tls::http_client() }
     }
 }
 

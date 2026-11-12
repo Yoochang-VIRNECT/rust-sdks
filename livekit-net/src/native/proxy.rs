@@ -35,7 +35,7 @@ use tokio::{
     net::TcpStream as TokioTcpStream,
 };
 
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use tokio::net::TcpStream;
 
@@ -146,81 +146,18 @@ pub(super) async fn connect_ws(
 
             log::debug!("Proxy connection established to {}", target);
 
-            // Create MaybeTlsStream based on original URL scheme
-            let stream = if url.scheme() == "wss" {
-                // Only enable proxy TLS support when rustls-tls-native-roots is enabled
-                #[cfg(feature = "rustls-tls-native-roots")]
-                {
-                    // For WSS, we need to establish TLS over the proxy connection
-                    use std::sync::Arc;
-                    use tokio_rustls::{
-                        rustls::{self, pki_types::ServerName},
-                        TlsConnector,
-                    };
-
-                    // Load native root certificates
-                    let mut root_store = rustls::RootCertStore::empty();
-                    let cert_result = rustls_native_certs::load_native_certs();
-                    if !cert_result.errors.is_empty() {
-                        log::warn!(
-                            "Native root CA certificate loading errors: {:?}",
-                            cert_result.errors
-                        );
-                    }
-                    if cert_result.certs.is_empty() {
-                        return Err(TransportError::Connection(format!(
-                            "Could not load any native root certificates: {:?}",
-                            cert_result.errors
-                        )));
-                    }
-                    let total = cert_result.certs.len();
-                    let (added, ignored) = root_store.add_parsable_certificates(cert_result.certs);
-                    log::debug!(
-                        "Added {added}/{total} native root certificates ({ignored} ignored)"
-                    );
-
-                    let tls_config = rustls::ClientConfig::builder()
-                        .with_root_certificates(root_store)
-                        .with_no_client_auth();
-
-                    let server_name = ServerName::try_from(host.to_owned()).map_err(|_| {
-                        TransportError::Connection(format!("Invalid DNS name: {}", host))
-                    })?;
-
-                    let connector = TlsConnector::from(Arc::new(tls_config));
-                    let tls_stream =
-                        connector.connect(server_name, proxy_stream).await.map_err(|e| {
-                            TransportError::Connection(format!("TLS connection error: {}", e))
-                        })?;
-
-                    MaybeTlsStream::Rustls(tls_stream)
-                }
-
-                #[cfg(not(feature = "rustls-tls-native-roots"))]
-                {
-                    // For non-rustls-tls-native-roots builds, don't support proxy for WSS
-                    return Err(TransportError::Connection(
-                        "WSS over proxy requires rustls-tls-native-roots feature".into(),
-                    ));
-                }
-            } else {
-                // For plain WS, just use the proxy stream directly
-                MaybeTlsStream::Plain(proxy_stream)
-            };
-
-            // Now perform WebSocket handshake over the established connection
-            let (ws_stream, _) = tokio_tungstenite::client_async_with_config(request, stream, None)
-                .await
-                .map_err(map_ws_err)?;
+            // Use the same TLS policy for direct connections and CONNECT tunnels.
+            let (ws_stream, _) =
+                super::tls::connect_tunnel(request, proxy_stream).await.map_err(map_ws_err)?;
             ws_stream
         } else {
             // Proxy var is empty, connect directly
-            let (ws_stream, _) = connect_async(request).await.map_err(map_ws_err)?;
+            let (ws_stream, _) = super::tls::connect_direct(request).await.map_err(map_ws_err)?;
             ws_stream
         }
     } else {
         // No proxy env var set, connect directly
-        let (ws_stream, _) = connect_async(request).await.map_err(map_ws_err)?;
+        let (ws_stream, _) = super::tls::connect_direct(request).await.map_err(map_ws_err)?;
         ws_stream
     };
 
