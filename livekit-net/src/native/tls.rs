@@ -41,6 +41,8 @@ pub(super) fn http_client() -> reqwest::Client {
 /// Construct a client with a fixed policy (also used by loopback regression tests).
 fn http_client_with_policy(_skip: bool) -> reqwest::Client {
     let builder = reqwest::Client::builder();
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let builder = builder.http1_only();
     #[cfg(any(
         feature = "native-tls",
         feature = "native-tls-vendored",
@@ -125,31 +127,62 @@ fn connector() -> Result<Option<tokio_tungstenite::Connector>, tungstenite::Erro
 fn connector_with_policy(
     skip: bool,
 ) -> Result<Option<tokio_tungstenite::Connector>, tungstenite::Error> {
-    if !skip {
+    // Mobile/Linux retain the previous strict connector and ALPN defaults.
+    if !skip && !cfg!(any(target_os = "windows", target_os = "macos")) {
         return Ok(None);
     }
     // Match tungstenite's native-tls precedence when both backends are enabled.
     #[cfg(any(feature = "native-tls", feature = "native-tls-vendored"))]
     {
-        let connector = native_tls::TlsConnector::builder()
-            .danger_accept_invalid_certs(true)
-            .danger_accept_invalid_hostnames(true)
-            .build()
-            .map_err(|e| tungstenite::Error::Io(std::io::Error::other(e)))?;
+        let mut builder = native_tls::TlsConnector::builder();
+        builder.danger_accept_invalid_certs(skip).danger_accept_invalid_hostnames(skip);
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        builder.request_alpns(&["http/1.1"]);
+        let connector =
+            builder.build().map_err(|e| tungstenite::Error::Io(std::io::Error::other(e)))?;
         Ok(Some(tokio_tungstenite::Connector::NativeTls(connector)))
     }
     #[cfg(not(any(feature = "native-tls", feature = "native-tls-vendored")))]
     {
         use std::sync::Arc;
         use tokio_rustls::rustls;
-        let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
         ))
         .with_safe_default_protocol_versions()
-        .map_err(|e| tungstenite::Error::Io(std::io::Error::other(e)))?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(rustls_bypass::Verifier))
-        .with_no_client_auth();
+        .map_err(|e| tungstenite::Error::Io(std::io::Error::other(e)))?;
+        let mut config = if skip {
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(rustls_bypass::Verifier))
+                .with_no_client_auth()
+        } else {
+            // Match tungstenite's feature-selected roots without weakening strict TLS.
+            #[allow(unused_mut)]
+            let mut roots = rustls::RootCertStore::empty();
+            #[cfg(feature = "rustls-tls-native-roots")]
+            {
+                let result = rustls_native_certs::load_native_certs();
+                if !result.errors.is_empty() {
+                    log::warn!("native root CA certificate loading errors: {:?}", result.errors);
+                }
+                #[cfg(not(feature = "rustls-tls-webpki-roots"))]
+                if result.certs.is_empty() {
+                    return Err(tungstenite::Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "no native root CA certificates found",
+                    )));
+                }
+                roots.add_parsable_certificates(result.certs);
+            }
+            #[cfg(feature = "rustls-tls-webpki-roots")]
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            builder.with_root_certificates(roots).with_no_client_auth()
+        };
+        // Do not advertise h2 to gateways handling a HTTP/1.1 WebSocket upgrade.
+        if cfg!(any(target_os = "windows", target_os = "macos")) {
+            config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        }
         Ok(Some(tokio_tungstenite::Connector::Rustls(Arc::new(config))))
     }
 }

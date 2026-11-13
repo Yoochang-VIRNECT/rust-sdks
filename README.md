@@ -307,3 +307,13 @@ We'll first use it as a basis for our Unity SDK (under development), but over ti
 </tbody>
 </table>
 <!--END_REPO_NAV-->
+
+### VIRNECT desktop HTTP/1.1 policy
+
+Windows and macOS targets force the native signalling HTTPS client to HTTP/1.1
+and advertise only `http/1.1` over WSS ALPN, including CONNECT tunnels. This is
+independent of `LIVEKIT_SKIP_CERT_VERIFY` and applies with strict TLS too.
+Android (including Quest), iOS and Linux retain their existing negotiation policy.
+The policy follows the Rust compilation target, not the build host or Unity project:
+ViewMobile in the macOS Editor uses the desktop policy; its Android player does not.
+All target binaries can be shipped in one Unity SDK package.

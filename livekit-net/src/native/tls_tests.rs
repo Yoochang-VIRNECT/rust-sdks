@@ -24,7 +24,7 @@ fn acceptor() -> TlsAcceptor {
     let key =
         PrivateKeyDer::from_pem_slice(include_bytes!("../../tests/fixtures/tls-test-key.pem"))
             .unwrap();
-    let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+    let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
     .with_safe_default_protocol_versions()
@@ -32,6 +32,8 @@ fn acceptor() -> TlsAcceptor {
     .with_no_client_auth()
     .with_single_cert(vec![cert], key)
     .unwrap();
+    // Prefer h2: desktop clients must still negotiate HTTP/1.1.
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     TlsAcceptor::from(Arc::new(config))
 }
 
@@ -46,8 +48,11 @@ async fn self_signed_https_and_wss_obey_policy() {
             let server = tokio::spawn(async move {
                 let (stream, _) = listener.accept().await.unwrap();
                 if let Ok(mut stream) = tls.accept(stream).await {
+                    #[cfg(any(target_os = "windows", target_os = "macos"))]
+                    assert_ne!(stream.get_ref().1.alpn_protocol(), Some(b"h2".as_slice()));
                     let mut buf = [0; 4096];
                     if stream.read(&mut buf).await.unwrap_or(0) > 0 {
+                        assert!(buf.starts_with(b"GET / HTTP/1.1\r\n"));
                         let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").await;
                     }
                 }
@@ -64,6 +69,10 @@ async fn self_signed_https_and_wss_obey_policy() {
                 let server = tokio::spawn(async move {
                     let (stream, _) = listener.accept().await.unwrap();
                     if let Ok(stream) = tls.accept(stream).await {
+                        #[cfg(any(target_os = "windows", target_os = "macos"))]
+                        assert_eq!(stream.get_ref().1.alpn_protocol(), Some(b"http/1.1".as_slice()));
+                        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+                        assert_eq!(stream.get_ref().1.alpn_protocol(), None);
                         if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
                             if let Some(Ok(message)) = ws.next().await { let _ = ws.send(message).await; }
                         }
